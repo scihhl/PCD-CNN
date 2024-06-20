@@ -255,7 +255,6 @@ class FrameDataProcessor:
         Extract point clouds for objects (before coordinate transformation).
         """
         pc_manager = PointCloudManager(frame_data['point_cloud'])
-        # 提取对象的点云（在坐标转换之前）
         pc_manager.extract_object_point_clouds(frame_data['labels'])
 
     def traverse_points(self, frame_data, file_id):
@@ -311,15 +310,12 @@ class FrameDataProcessor:
         :param points: An array of points in the local coordinate system to be transformed.
         :return: An array of points transformed into the global coordinate system.
         """
-        # 提取位置和四元数
         translation = np.array([pose['position']['x'], pose['position']['y'], pose['position']['z']])
         quaternion = np.array(
             [pose['quaternion']['w'], pose['quaternion']['x'], pose['quaternion']['y'], pose['quaternion']['z']])
 
-        # 创建旋转矩阵
         rotation_matrix = o3d.geometry.get_rotation_matrix_from_quaternion(quaternion)
 
-        # 应用旋转和平移
         points_transformed = np.dot(points, rotation_matrix.T) + translation
         return points_transformed
 
@@ -448,6 +444,63 @@ class PointCloudManager:
         return angle
 
 
+class ObjectExtractor:
+    def __init__(self, base_dir='data'):
+        self.base_dir = base_dir
+        self.train_set, self.test_set = self.split_dataset()
+        self.objects_train = {i: [] for i in range(1, 7)}
+        self.bboxes_train = {i: [] for i in range(1, 7)}
+        self.objects_test = {i: [] for i in range(1, 7)}
+        self.bboxes_test = {i: [] for i in range(1, 7)}
+
+    @staticmethod
+    def list_directories(path):
+        """
+        Return a list of all subdirectories in the given path.
+        :param path: The directory path to list subdirectories.
+        :return: List of subdirectory names.
+        """
+        entries = os.listdir(path)
+        directories = [entry for entry in entries if os.path.isdir(os.path.join(path, entry))]
+        return directories
+
+    def split_dataset(self):
+        """
+        Split the dataset into training and testing sets.
+        :return: A tuple containing training and testing sets.
+        """
+        file_path = f"{self.base_dir}/tracking_train_label"
+        directories = self.list_directories(file_path)
+        n = len(directories)
+        train_set = directories[:4 * n // 5]
+        test_set = directories[4 * n // 5:]
+        return train_set, test_set
+
+    def extract_object(self):
+        """
+        Extract features from the dataset and save them to an Excel file.
+        :param dataset: List of directories containing the dataset.
+        """
+
+        for directory in self.train_set:
+            frame_id = directory
+            processor = FrameDataProcessor(self.base_dir, frame_id)
+            frame_data, _ = processor.load_all_frame_data()
+            for frame in frame_data:
+                for obj in frame['labels']:
+                    self.objects_train[obj['object_type']].append(obj['point_cloud'])
+                    self.bboxes_train[obj['object_type']].append(obj['bbox'])
+
+        for directory in self.test_set:
+            frame_id = directory
+            processor = FrameDataProcessor(self.base_dir, frame_id)
+            frame_data, _ = processor.load_all_frame_data()
+            for frame in frame_data:
+                for obj in frame['labels']:
+                    self.objects_test[obj['object_type']].append(obj['point_cloud'])
+                    self.bboxes_test[obj['object_type']].append(obj['bbox'])
+
+
 class PCDObjectExtractor(FrameDataProcessor):
     def __init__(self, base_dir, frame_id):
         """
@@ -515,7 +568,8 @@ def test_PCD():
     loader = PointCloudLoader(base_dir='data')
     point_clouds = loader.load_all_point_clouds(track_id=1, frame_id='9048_1')
     point_cloud_np = loader.convert_to_numpy(point_clouds)
-    print(point_cloud_np)
+    print(point_cloud_np[0])
+    return point_clouds[0]
 
 
 def test_pose():
@@ -527,7 +581,7 @@ def test_pose():
 def test_label():
     label_loader = ObjectLabelLoader(base_dir='data')
     object_labels = label_loader.load_object_labels(frame_id='9048_1', file_id='233')
-    print(object_labels)
+    print(object_labels[0])
 
 
 def test_frame():
@@ -538,13 +592,15 @@ def test_frame():
     frame_data, temp = processor.load_all_frame_data()
 
     for i, frame in enumerate(frame_data):
-        print(f'for No.{i} frame we have:')
-        print('Pose of this PCD files is', frame['pose'])
-        print('Labels found in this PCD files are', len(frame['labels']))
-        print('First label coordinates are', frame['labels'])
-        print('PCD file is composed of', frame['point_cloud'])
-        print('First point coordinates are', np.asarray(frame['point_cloud'].points)[0])
-        print('+++++++++++++++++end++++++++++++++++')
+        if i == 0:
+            print(f'for No.{i} frame we have:')
+            print('Pose of this PCD files is', frame['pose'])
+            print('Labels found in this PCD files are', len(frame['labels']))
+            print('First label is', frame['labels'][0])
+            print('PCD file is composed of', frame['point_cloud'])
+            print('First point coordinates are', np.asarray(frame['point_cloud'].points)[0])
+            print('+++++++++++++++++end++++++++++++++++')
+    return frame_data
 
 
 def test_extract():
@@ -553,7 +609,7 @@ def test_extract():
     frame_data = extractor.extract_objects()
     return frame_data
 
-# 测试
+
 if __name__ == '__main__':
     # test_PCD()
     # test_pose()
